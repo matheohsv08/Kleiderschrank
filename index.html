@@ -87,6 +87,7 @@ input[type=search],input[type=text],input[type=date],select{width:100%;font-size
 .ph svg{width:68%;height:68%}
 .star{position:absolute;top:5px;right:7px;color:var(--accent);font-size:15px}
 .cnt{position:absolute;right:5px;bottom:5px;font-size:11.5px;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:0 5px}
+.bl{position:absolute;left:5px;bottom:5px;font-size:12px;line-height:1.3;background:var(--surface);border:1px solid var(--bad);color:var(--bad);border-radius:6px;padding:0 5px}
 .exm{position:absolute;left:5px;top:5px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;background:var(--surface);border:1px dashed var(--muted);border-radius:4px;padding:0 4px;color:var(--muted)}
 .cap{display:grid;padding:7px 8px 8px;min-width:0}
 .cap .n{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -280,6 +281,7 @@ const seasonOk=(i,s)=>!s||!i.seasons||!i.seasons.length||i.seasons.includes(s);
 const seasonFor=t=>t>22?'Sommer':t>=8?'Übergang':'Winter';
 const TYPE_MAP={'Thermo-Shirt':['basis','Sportshirt'],'Sport-Longsleeve':['basis','Sportshirt'],'Sportshorts':['hose','Sporthose'],'Sport-Tight':['hose','Sporthose'],'Laufschuhe':['schuhe','Sportschuhe'],'Hallenschuhe':['schuhe','Sportschuhe'],'Tennisschuhe':['schuhe','Sportschuhe'],'Trainingsschuhe':['schuhe','Sportschuhe']};
 const INVITE='0329';
+const favOn=()=>S.meta.favBoost!==false;
 const SOCK=['weiß','schwarz','egal','keine'];
 const WEATHER_J=['Winterjacke','Regenjacke'];
 const SLOTS=[['basis','Basis'],['layer','Schicht'],['jacket','Jacke'],['hose','Hose'],['shoes','Schuhe'],['kopf','Kopf']];
@@ -338,10 +340,10 @@ function migrate(raw){const i={...raw};
   if(!Array.isArray(i.seasons))i.seasons=i.warmth==='dick'?['Winter']:(i.warmth==='leicht'&&/Shorts|Sandalen/.test(i.type||''))?['Sommer']:[];
   delete i.warmth;
   const t=CATS[i.cat]?.types[i.type];
-  return {count:1,styles:t?[...t[1]]:[],pattern:'uni',fav:false,color2:'',sock:'egal',name:'',brand:'',price:'',photo:'',created:Date.now(),...i};}
+  return {count:1,styles:t?[...t[1]]:[],pattern:'uni',fav:false,blacklist:false,set:'',color2:'',sock:'egal',name:'',brand:'',price:'',photo:'',created:Date.now(),...i};}
 
 const S={items:[],outfits:[],packs:[],meta:{id:'meta',recent:[],seeded:false,schema:1},view:'schrank',
-  filters:{q:'',cat:'',type:'',color:'',season:'',style:'',fav:false},
+  filters:{q:'',cat:'',type:'',color:'',season:'',style:'',fav:false,bl:false},
   outfit:{style:'Casual',pin:null,t:12,rain:false,src:'manuell',results:null,rolled:null},packOpen:null,dbOk:false};
 
 function exampleItems(){
@@ -361,12 +363,12 @@ function exampleItems(){
     ex('jacke','Übergangsjacke','Olive/Khaki'),
     ex('jacke','Winterjacke','Schwarz',{warmth:'dick',styles:['Casual','Streetwear','Schick']}),
     ex('jacke','Regenjacke','Navy',{warmth:'leicht'}),
-    ex('jacke','Sportjacke','Schwarz',{name:'Trainingsjacke',brand:'Adidas',styles:['Streetwear','Sport']}),
+    ex('jacke','Sportjacke','Schwarz',{name:'Trainingsjacke',brand:'Adidas',styles:['Streetwear','Sport'],set:'Adidas-Anzug'}),
     ex('hose','Jeans','Denim'),
     ex('hose','Jeans','Schwarz',{name:'Schwarze Jeans'}),
     ex('hose','Chino','Beige/Sand'),
     ex('hose','Stoffhose','Anthrazit'),
-    ex('hose','Jogging-/Trainingshose','Schwarz',{name:'Trainingshose',brand:'Adidas',styles:['Streetwear','Sport']}),
+    ex('hose','Jogging-/Trainingshose','Schwarz',{name:'Trainingshose',brand:'Adidas',styles:['Streetwear','Sport'],set:'Adidas-Anzug'}),
     ex('hose','Shorts','Navy',{warmth:'leicht'}),
     ex('schuhe','Sneaker','Weiß',{sock:'weiß',fav:true}),
     ex('schuhe','Sneaker','Schwarz',{sock:'schwarz'}),
@@ -384,8 +386,8 @@ function exampleItems(){
 function exampleV2(){
   const ex=(cat,type,color,o={})=>migrate({id:'ex-'+uid(),example:true,cat,type,color,styles:[...CATS[cat].types[type][1]],...o});
   return [
-    ex('schicht','Hoodie','Hellgrau',{name:'Gemütlicher Hoodie',styles:['Gemütlich']}),
-    ex('hose','Jogging-/Trainingshose','Hellgrau',{name:'Gemütliche Jogginghose',styles:['Gemütlich']}),
+    ex('schicht','Hoodie','Hellgrau',{name:'Gemütlicher Hoodie',styles:['Gemütlich'],set:'Reise-Set'}),
+    ex('hose','Jogging-/Trainingshose','Hellgrau',{name:'Gemütliche Jogginghose',styles:['Gemütlich'],set:'Reise-Set'}),
     ex('schlaf','Schlafshirt','Weiß',{name:'Altes T-Shirt',count:2}),
     ex('schlaf','Schlafshorts','Navy',{name:'Boxershorts',count:2})
   ];
@@ -415,13 +417,21 @@ function evalOutfit(o,{t,rain,R,pen}){
   else sc-=25;
   if(vis.filter(i=>i.pattern==='gemustert').length>1)sc-=20;
   const top=o.layer||o.basis,d=Math.abs((COL[top.color]?.L??.5)-(COL[o.hose.color]?.L??.5));
+  const setCount=new Map();for(const i of vis)if(i.set)setCount.set(i.set,(setCount.get(i.set)||0)+1);
+  const fullSets=[...setCount].filter(([,n])=>n>=2).map(([k])=>k);
+  const setTH=!!top.set&&top.set===o.hose.set;
+  const allBlack=[o.basis,o.layer,o.hose].filter(Boolean).every(i=>i.color==='Schwarz'||i.color==='Anthrazit');
+  if(fullSets.length){sc+=1;fullSets.forEach(k=>why.push([6,`Set: ${k}`]));}
+  if(allBlack){sc+=5;why.push([5,'All Black']);}
   if(d>=.35){sc+=5;why.push([3,'Starker Hell-Dunkel-Kontrast oben/unten']);}
   else if(d>=.2){sc+=2;why.push([1,'Guter Kontrast oben/unten']);}
-  else if(d<.1)sc-=3;
+  else if(d<.1&&!allBlack&&!setTH)sc-=3;
+  const favs=vis.filter(i=>i.fav);
+  if(favs.length&&favOn()){sc+=1.5*Math.min(3,favs.length);why.push([1,favs.length===1?`Favorit: ${dname(favs[0])}`:`${favs.length} Favoriten dabei`]);}
   const cols=[...new Set(vis.map(i=>i.color))];let pc=0;
   for(let a=0;a<cols.length;a++)for(let b=a+1;b<cols.length;b++){if(pc<3&&GOOD.has(pairKey(cols[a],cols[b]))){pc++;sc+=3;why.push([4,`${cols[a]} + ${cols[b]}: bewährtes Paar`]);}}
   if(o.shoes.color==='Braun'&&o.hose.color==='Schwarz')sc-=10;
-  if(o.hose.color==='Denim'&&[o.basis,o.layer,o.jacket].some(i=>i&&i.color==='Denim'))sc-=10;
+  if(o.hose.color==='Denim'&&[o.basis,o.layer,o.jacket].some(i=>i&&i.color==='Denim'&&!(i.set&&i.set===o.hose.set)))sc-=10;
   if(t>22&&/Shorts/.test(o.hose.type)){sc+=2;why.push([2,`Shorts bei ${t} °C`]);}
   if(o.layer){if(t<8&&o.layer.seasons.includes('Winter'))sc+=2;if(R.layer==='none')sc-=4;}
   if(o.jacket){
@@ -446,17 +456,18 @@ function trim(lists,max){
 }
 function suggest({style,t,rain,pin}){
   const R=weatherRules(t,rain),pinI=pin?S.items.find(i=>i.id===pin):null,has=i=>i.styles.includes(style),pen=new Map(),notes=[];
-  const sea=seasonFor(t);const P=c=>S.items.filter(i=>i.cat===c&&has(i)&&seasonOk(i,sea));
+  const sea=seasonFor(t);const P=c=>S.items.filter(i=>i.cat===c&&has(i)&&!i.blacklist&&seasonOk(i,sea));
   let basis=P('basis'),hose=P('hose').filter(i=>R.shorts||!/Shorts/.test(i.type)),shoes=P('schuhe').filter(i=>R.sandals||i.type!=='Sandalen/Slides');
   let layers=P('schicht');
   let jackets=P('jacke').filter(i=>R.jTypes.includes(i.type));
   const pinL=pinI&&pinI.cat==='schicht',pinJ=pinI&&pinI.cat==='jacke';
   if(R.jacket==='req'&&!jackets.length&&!pinJ){
-    let alt=S.items.filter(i=>i.cat==='jacke'&&R.jTypes.includes(i.type)&&!noOutfit(i));
+    let alt=S.items.filter(i=>i.cat==='jacke'&&R.jTypes.includes(i.type)&&!noOutfit(i)&&!i.blacklist);
     if(alt.length){alt.forEach(i=>pen.set(i.id,-4));notes.push(`Keine ${R.jTypes.join('/')} als ${style} getaggt, nehme trotzdem eine.`);}
     else if(R.cold){alt=P('jacke').filter(i=>['Übergangsjacke','Regenjacke'].includes(i.type));alt.forEach(i=>pen.set(i.id,-6));if(alt.length)notes.push('Keine Winterjacke im Schrank, Übergangsjacke als Ersatz.');}
     jackets=alt;
   }
+  if(pinI&&pinI.set)S.items.forEach(i=>{if(i!==pinI&&i.set===pinI.set)pen.set(i.id,(pen.get(i.id)||0)+6);});
   if(pinI){
     if(pinI.cat==='basis')basis=[pinI];if(pinI.cat==='hose')hose=[pinI];if(pinI.cat==='schuhe')shoes=[pinI];
     if(pinI.cat!=='kopf'&&!has(pinI))notes.push(`„${dname(pinI)}“ ist nicht als ${style} getaggt, wird aber trotzdem genutzt.`);
@@ -481,7 +492,7 @@ function suggest({style,t,rain,pin}){
   for(const r of out){if(picks.every(p=>diffCount(p,r)>=2))picks.push(r);if(picks.length===3)break;}
   if(picks.length<3)for(const r of out){if(!picks.includes(r)&&picks.every(p=>diffCount(p,r)>=1))picks.push(r);if(picks.length===3)break;}
   const kopfPin=pinI&&pinI.cat==='kopf'?pinI:null;
-  const muetze=!kopfPin&&(style==='Casual'||style==='Streetwear')&&t<8?S.items.filter(i=>i.type==='Mütze'&&has(i)).sort((a,b)=>(COL[a.color]?.accent?1:0)-(COL[b.color]?.accent?1:0))[0]:null;
+  const muetze=!kopfPin&&(style==='Casual'||style==='Streetwear')&&t<8?S.items.filter(i=>i.type==='Mütze'&&has(i)&&!i.blacklist).sort((a,b)=>(COL[a.color]?.accent?1:0)-(COL[b.color]?.accent?1:0))[0]:null;
   picks.forEach(p=>{p.o.kopf=kopfPin||muetze||null;if(muetze)p.reasons.push('Mütze bei unter 8 °C');});
   return {list:picks,notes,total:out.length};
 }
@@ -510,6 +521,7 @@ function validTriple(b,h,s,st=OUTFIT_STYLES){
 function packDays(p){if(!p.start||!p.end)return 1;return Math.max(1,Math.round((Date.parse(p.end)-Date.parse(p.start))/864e5)+1);}
 function packD(p){const days=packDays(p);return p.wash>0?Math.min(days,p.wash):days;}
 function buildPack(p){
+  const ITEMS=S.items.filter(i=>!i.blacklist);
   const days=packDays(p),D=packD(p),cl=p.climate,warn=[];
   const F=Math.min(Math.max(0,p.fancyDays||0),D),E=D-F;
   const used=new Map(),qty=i=>used.get(i)||0,entries=[];
@@ -521,20 +533,24 @@ function buildPack(p){
   /* Reise-Fit (An-/Abreise) */
   const travel=new Set();
   if(p.travelFit){
-    const G=S.items.filter(i=>i.styles.includes('Gemütlich'));
-    const top=G.find(i=>i.cat==='schicht')||G.find(i=>i.cat==='basis'),bottom=G.find(i=>i.cat==='hose');
-    [top,bottom].forEach(i=>{if(i){push(i,1,true);travel.add(i);}});
+    const G=ITEMS.filter(i=>i.styles.includes('Gemütlich')).sort((a,b)=>favOn()?(b.fav?1:0)-(a.fav?1:0):0);
+    const findTop=f=>G.find(i=>f(i)&&i.cat==='schicht')||G.find(i=>f(i)&&i.cat==='basis')||G.find(i=>f(i)&&i.cat==='jacke');
+    let top=null,bottom=null,extra=[];
+    for(const n of [...new Set(G.filter(i=>i.set).map(i=>i.set))]){const t=findTop(i=>i.set===n),h=G.find(i=>i.set===n&&i.cat==='hose');
+      if(t&&h){top=t;bottom=h;extra=G.filter(i=>i.set===n&&i!==t&&i!==h&&['basis','schicht','jacke'].includes(i.cat));break;}}
+    if(!top)top=findTop(()=>true);if(!bottom)bottom=G.find(i=>i.cat==='hose');
+    [top,bottom,...extra].forEach(i=>{if(i){push(i,1,true);travel.add(i);}});
     if(!top||!bottom)warn.push('Für das Reise-Fit fehlt ein Teil mit Tag „Gemütlich“ ('+[!top&&'Oberteil',!bottom&&'Hose'].filter(Boolean).join(', ')+').');
   }
   /* Tage aufteilen: F schick, E Casual/Streetwear */
   const TRI=['schuhe','hose','basis'];
   const portion=(st,T)=>{
-    const pool=c=>S.items.filter(i=>i.cat===c&&climOk(i)&&!travel.has(i)&&i.styles.some(x=>st.includes(x)));
+    const pool=c=>ITEMS.filter(i=>i.cat===c&&climOk(i)&&!travel.has(i)&&i.styles.some(x=>st.includes(x)));
     const P={basis:pool('basis'),hose:pool('hose'),schuhe:pool('schuhe')},ch={basis:[],hose:[],schuhe:[]},got={basis:0,hose:0,schuhe:0};
     const gain=(sl,i)=>{const [x,y]=TRI.filter(z=>z!==sl);const A=ch[x].length?ch[x]:P[x],B=ch[y].length?ch[y]:P[y];let n=0;
       for(const a of A)for(const b of B){const t={[sl]:i,[x]:a,[y]:b};if(validTriple(t.basis,t.hose,t.schuhe,st))n++;}return n;};
     const pick=sl=>{let best=null,bs=-Infinity;for(const i of P[sl]){if(qty(i)>=i.count)continue;let v=gain(sl,i);if(qty(i)>0)v-=1000;
-      if(ch[sl].some(e=>e!==i&&e.type===i.type&&e.color===i.color))v*=.5;v+=(i.fav?.5:0)+Math.random()*.1;if(v>bs){bs=v;best=i;}}return best;};
+      if(ch[sl].some(e=>e!==i&&e.type===i.type&&e.color===i.color))v*=.5;if(i.fav&&favOn())v=v*1.3+1;v+=Math.random()*.1;if(v>bs){bs=v;best=i;}}return best;};
     for(const sl of TRI){while(got[sl]<T[sl]){const i=pick(sl);if(!i)break;if(!ch[sl].includes(i))ch[sl].push(i);push(i);got[sl]++;}}
     return {ch,got};
   };
@@ -550,27 +566,27 @@ function buildPack(p){
   /* Zweite Schicht */
   const Tl=cl==='warm'?1:cl==='gemischt'?Math.min(2,D):Math.min(3,D);
   const fitsL=l=>{let n=0;for(const b of Bs)for(const h of Hs){const f=[formal(l),formal(b),formal(h)];if(Math.max(...f)-Math.min(...f)<=2&&accentOk([l,b,h]))n++;}return n;};
-  let nl=0;S.items.filter(i=>i.cat==='schicht'&&climOk(i)&&!travel.has(i)&&!noOutfit(i))
-    .map(l=>({l,s:fitsL(l)+(cl==='kalt'&&l.seasons.includes('Winter')?2:0)+(cl==='warm'&&l.seasons.includes('Sommer')?2:0)})).sort((a,b)=>b.s-a.s)
+  let nl=0;ITEMS.filter(i=>i.cat==='schicht'&&climOk(i)&&!travel.has(i)&&!noOutfit(i))
+    .map(l=>({l,s:fitsL(l)+(cl==='kalt'&&l.seasons.includes('Winter')?2:0)+(cl==='warm'&&l.seasons.includes('Sommer')?2:0)+(l.fav&&favOn()?2:0)})).sort((a,b)=>b.s-a.s)
     .forEach(({l})=>{if(nl<Tl){push(l);nl++;}});
   /* Jacke */
   if(cl!=='warm'){
-    const J=S.items.filter(i=>i.cat==='jacke'&&climOk(i)&&!noOutfit(i)),fitsJ=j=>Hs.filter(h=>accentOk([j,h])).length;
+    const J=ITEMS.filter(i=>i.cat==='jacke'&&climOk(i)&&!noOutfit(i)),fitsJ=j=>Hs.filter(h=>accentOk([j,h])).length;
     const pref=cl==='kalt'?['Winterjacke']:['Übergangsjacke','Regenjacke','Sportjacke','Weste'];let found=null;
-    for(const ty of pref){const c=J.filter(j=>j.type===ty).sort((a,b)=>fitsJ(b)-fitsJ(a));if(c.length){found=c[0];break;}}
+    for(const ty of pref){const c=J.filter(j=>j.type===ty).sort((a,b)=>fitsJ(b)+(b.fav&&favOn()?1:0)-fitsJ(a)-(a.fav&&favOn()?1:0));if(c.length){found=c[0];break;}}
     if(!found&&cl==='kalt'){found=J.find(j=>j.type==='Übergangsjacke')||null;warn.push(found?'Keine Winterjacke gefunden, Übergangsjacke eingeplant.':'Keine Winterjacke gefunden.');}
     if(found)push(found);
   }
-  if(cl==='kalt'){const m=S.items.find(i=>i.type==='Mütze'&&!noOutfit(i));if(m)push(m);}
+  if(cl==='kalt'){const m=ITEMS.find(i=>i.type==='Mütze'&&!noOutfit(i));if(m)push(m);}
   /* Unterwäsche */
   const want=new Set(Sh.map(i=>i.sock));
-  const fill=(type,target,label)=>{const its=S.items.filter(i=>i.type===type).sort((a,b)=>(want.has(b.color.toLowerCase())?1:0)-(want.has(a.color.toLowerCase())?1:0));
+  const fill=(type,target,label)=>{const its=ITEMS.filter(i=>i.type===type).sort((a,b)=>(want.has(b.color.toLowerCase())?1:0)-(want.has(a.color.toLowerCase())?1:0));
     const got=cyc(its,target);if(got<target)warn.push(`Nur ${got} ${label} vorhanden (geplant: ${target}).`);};
   fill('Unterhose',D+1,'Unterhosen');fill('Socken',D+1,'Paar Socken');
   /* Schlafen: 1 Set pro angefangene 4 Nächte */
   const nights=Math.max(1,days-1),N=p.wash>0?Math.min(nights,p.wash):nights,sets=Math.ceil(N/4);
   const prefB=cl==='kalt'?'Schlafhose':'Schlafshorts';
-  const tops=S.items.filter(i=>i.type==='Schlafshirt'),bots=[...S.items.filter(i=>i.type===prefB),...S.items.filter(i=>i.cat==='schlaf'&&i.type!=='Schlafshirt'&&i.type!==prefB)];
+  const tops=ITEMS.filter(i=>i.type==='Schlafshirt'),bots=[...ITEMS.filter(i=>i.type===prefB),...ITEMS.filter(i=>i.cat==='schlaf'&&i.type!=='Schlafshirt'&&i.type!==prefB)];
   if(!tops.length&&!bots.length)warn.push('Keine Schlafsachen im Schrank.');else{cyc(tops,sets);cyc(bots,sets);}
   return {entries,warn};
 }
@@ -591,7 +607,7 @@ let toastT;function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=fa
 const chip=(g,v,label,on)=>`<button type="button" class="chip" data-g="${g}" data-v="${esc(v)}" aria-pressed="${!!on}">${label}</button>`;
 const sw=(g,v,hex,on,label)=>`<button type="button" class="sw${v?'':' none'}" data-g="${g}" data-v="${esc(v)}" aria-pressed="${!!on}" style="--c:${hex||'transparent'}"><i></i>${esc(label||v)}</button>`;
 const fld=(label,inner)=>`<div class="fld"><span class="lab">${label}</span>${inner}</div>`;
-function tile(i,extra=''){return `<button type="button" class="tile" data-a="item" data-id="${i.id}" ${extra}><span class="ph">${thumb(i)}${i.fav?'<span class="star" aria-label="Favorit">★</span>':''}${i.count>1?`<span class="cnt mono">×${i.count}</span>`:''}${i.example?'<span class="exm mono">Beispiel</span>':''}</span><span class="cap"><span class="n">${esc(dname(i))}</span><span class="s">${esc(sub(i))}</span></span></button>`;}
+function tile(i,extra=''){return `<button type="button" class="tile" data-a="item" data-id="${i.id}" ${extra}><span class="ph">${thumb(i)}${i.fav?'<span class="star" aria-label="Favorit">★</span>':''}${i.count>1?`<span class="cnt mono">×${i.count}</span>`:''}${i.blacklist?'<span class="bl" aria-label="Blacklist">⊘</span>':''}${i.example?'<span class="exm mono">Beispiel</span>':''}</span><span class="cap"><span class="n">${esc(dname(i))}</span><span class="s">${esc(sub(i))}</span></span></button>`;}
 
 function openSheet(html,mount){const old=$('#panel'),p=old.cloneNode(false);old.replaceWith(p);p.innerHTML=html;$('#sheet').hidden=false;document.body.style.overflow='hidden';p.scrollTop=0;if(mount)mount(p);}
 function closeSheet(){$('#sheet').hidden=true;$('#panel').innerHTML='';document.body.style.overflow='';}
@@ -614,8 +630,8 @@ function filtered(){const f=S.filters,q=f.q.trim().toLowerCase();
     if(f.cat&&i.cat!==f.cat)return false;if(f.type&&i.type!==f.type)return false;
     if(f.color&&i.color!==f.color&&i.color2!==f.color)return false;
     if(f.season&&!seasonOk(i,f.season))return false;
-    if(f.style&&!i.styles.includes(f.style))return false;if(f.fav&&!i.fav)return false;
-    if(q){const hay=[i.name,i.brand,i.type,CATS[i.cat].label,i.color,i.color2,...(i.seasons.length?i.seasons:['ganzjährig']),i.pattern,...i.styles,i.price,i.fav?'favorit':''].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    if(f.style&&!i.styles.includes(f.style))return false;if(f.fav&&!i.fav)return false;if(f.bl&&!i.blacklist)return false;
+    if(q){const hay=[i.name,i.brand,i.type,CATS[i.cat].label,i.color,i.color2,...(i.seasons.length?i.seasons:['ganzjährig']),i.pattern,...i.styles,i.price,i.set,i.blacklist?'blacklist':'',i.fav?'favorit':''].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;}).sort((a,b)=>ORDER.indexOf(a.cat)-ORDER.indexOf(b.cat)||a.created-b.created);}
 function renderSchrank(){
   const f=S.filters;
@@ -627,7 +643,7 @@ function renderSchrank(){
       <select id="g-col" aria-label="Farbe"><option value="">Alle Farben</option>${COLORS.map(([n])=>`<option${f.color===n?' selected':''}>${n}</option>`).join('')}</select>
       <select id="g-sea" aria-label="Saison"><option value="">Alle Saisons</option>${SEASONS.map(x=>`<option${f.season===x?' selected':''}>${x}</option>`).join('')}</select>
     </div></div>
-    <div class="scroller"><div class="chip-row">${['',...STYLES].map(s=>`<button type="button" class="chip" data-a="fstyle" data-v="${s}" aria-pressed="${f.style===s}">${s||'Alle Stile'}</button>`).join('')}<button type="button" class="chip" data-a="ffav" aria-pressed="${f.fav}">★ Favoriten</button></div></div>
+    <div class="scroller"><div class="chip-row">${['',...STYLES].map(s=>`<button type="button" class="chip" data-a="fstyle" data-v="${s}" aria-pressed="${f.style===s}">${s||'Alle Stile'}</button>`).join('')}<button type="button" class="chip" data-a="ffav" aria-pressed="${f.fav}">★ Favoriten</button><button type="button" class="chip" data-a="fbl" aria-pressed="${f.bl}">⊘ Blacklist</button></div></div>
   </div><div id="res" style="display:grid;gap:12px"></div>`;
   renderResults();
 }
@@ -725,6 +741,8 @@ function openItem(id){
     <div class="two">${fld('Muster','<div class="row" id="e-pat"></div>')}<div id="e-seaw">${fld('Saison','<div class="row" id="e-sea"></div><p class="hint">Nichts gewählt = ganzjährig</p>')}</div></div>
     ${fld('Stil','<div class="row" id="e-sty"></div><p class="hint" id="e-styh"></p>')}
     <div class="two">${fld('Anzahl','<div class="row"><div class="step big" id="e-cnt"></div></div>')}${fld('Favorit','<div class="row" id="e-fav"></div>')}</div>
+    ${fld('Blacklist','<div class="row" id="e-bl"></div><p class="hint">Nie in Outfit-Vorschlägen und nie automatisch in Packlisten. Manuell hinzufügen geht trotzdem.</p>')}
+    <div id="e-setw">${fld('Set <i>optional</i>',`<div class="row" id="e-set"></div><input type="text" id="e-setn" placeholder="Neues Set, z. B. Adidas-Anzug" autocomplete="off"><p class="hint">Teile im gleichen Set werden gern zusammen vorgeschlagen, auch in gleicher Farbe.</p>`)}</div>
     <div id="e-sockw">${fld('Passende Socken','<div class="row" id="e-sock"></div>')}</div>
     ${fld('Name <i>optional</i>',`<input type="text" id="e-name" value="${esc(d.name)}" placeholder="z. B. Oxford-Hemd">`)}
     <div class="two">${fld('Marke <i>optional</i>',`<input type="text" id="e-brand" value="${esc(d.brand)}">`)}${fld('Preis in € <i>optional</i>',`<input type="text" inputmode="decimal" id="e-price" value="${esc(d.price)}">`)}</div>
@@ -748,6 +766,10 @@ function openItem(id){
       q('#e-cnt').innerHTML=`<button type="button" data-g="cnt" data-v="-1" aria-label="weniger">−</button><span class="mono">${d.count}</span><button type="button" data-g="cnt" data-v="1" aria-label="mehr">+</button>`;
       q('#e-fav').innerHTML=chip('fav','1',d.fav?'★ Favorit':'☆ Kein Favorit',d.fav);
       q('#e-sockw').hidden=d.cat!=='schuhe';
+      q('#e-bl').innerHTML=chip('bl','1',d.blacklist?'⊘ Auf der Blacklist':'Nicht auf der Blacklist',d.blacklist);
+      const sets=[...new Set(S.items.filter(i=>i.set&&i.id!==d.id).map(i=>i.set).concat(d.set?[d.set]:[]))].sort();
+      q('#e-set').innerHTML=chip('set','','Kein Set',!d.set)+sets.map(n=>chip('set',n,esc(n),d.set===n)).join('');
+      q('#e-setw').hidden=NOSTYLE.includes(d.cat);
       q('#e-sock').innerHTML=SOCK.map(s=>chip('sock',s,s,d.sock===s)).join('');
     };
     paint();
@@ -755,7 +777,7 @@ function openItem(id){
       if(g==='cat'){const prev=d.cat;d.cat=v;d.type=Object.keys(CATS[v].types)[0];if(!touched||!d.styles.length||NOSTYLE.includes(v)||NOSTYLE.includes(prev))d.styles=defaults();}
       else if(g==='type'){d.type=v;if(!touched)d.styles=defaults();}
       else if(g==='c1')d.color=v;else if(g==='c2'){d.color2=v;if(!v){showC2=false;moreC2=false;}}else if(g==='m1')moreC1=!moreC1;else if(g==='m2')moreC2=!moreC2;else if(g==='c2open')showC2=true;else if(g==='pat')d.pattern=v;else if(g==='sea')d.seasons=d.seasons.includes(v)?d.seasons.filter(x=>x!==v):[...d.seasons,v];else if(g==='sock')d.sock=v;
-      else if(g==='fav')d.fav=!d.fav;
+      else if(g==='fav')d.fav=!d.fav;else if(g==='bl')d.blacklist=!d.blacklist;else if(g==='set'){d.set=v;q('#e-setn').value='';}
       else if(g==='sty'){touched=true;d.styles=d.styles.includes(v)?d.styles.filter(s=>s!==v):[...d.styles,v];}
       else if(g==='cnt')d.count=Math.max(1,Math.min(99,d.count+Number(v)));
       paint();});
@@ -766,13 +788,14 @@ function openItem(id){
       if(it)setPhoto(it.getAsFile());else toast('Kein Bild in der Zwischenablage');paste.textContent='';paste.blur();});
     paste.addEventListener('input',()=>{paste.textContent='';});
     q('#e-rmph').addEventListener('click',()=>{d.photo='';paint();});
+    q('#e-setn').addEventListener('input',e=>{const v=e.target.value.trim();if(v)d.set=v;paint();});
     const save=()=>{d.name=q('#e-name').value.trim();d.brand=q('#e-brand').value.trim();d.price=q('#e-price').value.trim();
-      if(NOSTYLE.includes(d.cat)){d.styles=[];d.seasons=[];}else if(!d.styles.length){toast('Wähl mindestens einen Stil');return;}
+      if(NOSTYLE.includes(d.cat)){d.styles=[];d.seasons=[];d.set='';}else if(!d.styles.length){toast('Wähl mindestens einen Stil');return;}
       const ix=S.items.findIndex(i=>i.id===d.id);if(ix>=0)S.items[ix]=d;else S.items.push(d);
       put('items',d);closeSheet();S.outfit.results=null;renderAll();toast(src?'Gespeichert':'Teil hinzugefügt');};
     q('#e-save').addEventListener('click',save);q('#e-save2').addEventListener('click',save);
     if(src){
-      q('#e-build').addEventListener('click',()=>{if(NOSTYLE.includes(d.cat)||noOutfit(d)){toast('Dieses Teil kommt nicht in Outfit-Vorschläge');return;}S.outfit.pin=d.id;S.outfit.results=null;S.view='outfit';closeSheet();renderAll();scrollTo(0,0);});
+      q('#e-build').addEventListener('click',()=>{if(NOSTYLE.includes(d.cat)||noOutfit(d)||d.blacklist){toast(d.blacklist?'Teil steht auf der Blacklist':'Dieses Teil kommt nicht in Outfit-Vorschläge');return;}S.outfit.pin=d.id;S.outfit.results=null;S.view='outfit';closeSheet();renderAll();scrollTo(0,0);});
       q('#e-del').addEventListener('click',e=>{const b=e.currentTarget;if(!b.dataset.armed){b.dataset.armed='1';b.textContent='Wirklich löschen?';return;}
         S.items=S.items.filter(i=>i.id!==d.id);del('items',d.id);if(S.outfit.pin===d.id)S.outfit.pin=null;S.outfit.results=null;closeSheet();renderAll();toast('Teil gelöscht');});
     }
@@ -838,15 +861,17 @@ function openSettings(){
   openSheet(`<div class="sh-head"><span style="width:60px"></span><h2>Einstellungen</h2><button type="button" class="link strong" data-a="close-sheet">Fertig</button></div>
   <div class="set"><h3>Einladungscode</h3><p>Zum Weitergeben an Freunde: <b class="mono">${INVITE}</b>. Der Code hält zufällige Besucher ab, ist aber kein echter Schutz.</p></div>
   <div class="set"><h3>Wetter</h3><p>Standort Hamburg. Das Live-Wetter kommt von Open-Meteo. Es wird beim Öffnen der App geladen. Mit dem Regler kannst du es jederzeit überschreiben.</p></div>
+  <div class="set"><h3>Favoriten</h3><label class="tgl"><input type="checkbox" id="s-fav"${favOn()?' checked':''}>In Outfits und Packlisten bevorzugen</label><p class="hint">Aus: Favoriten bleiben markiert und filterbar, beeinflussen aber keine Vorschläge. Bestehende Packlisten ändern sich erst mit „Neu vorschlagen“.</p></div>
   <div class="set"><h3>Backup</h3><p>Sichert alle Teile inklusive Fotos, Outfits und Packlisten als JSON-Datei.</p>
     <div class="acts"><button type="button" class="btn" id="s-exp">Backup exportieren</button><label class="btn" for="s-imp">Backup importieren</label><input class="vh" type="file" id="s-imp" accept="application/json,.json"></div>
     <p class="hint">Sicher das Backup über „Teilen → In Dateien sichern“ in iCloud Drive, am besten regelmäßig. Wenn du die App vom Home-Bildschirm löschst, sind die Daten weg.</p></div>
   <div class="set"><h3>Daten</h3><p><span class="mono">${S.items.length}</span> Teile, davon <span class="mono">${ex}</span> Beispiele · <span id="s-size" class="mono">…</span></p>
     ${S.dbOk?'':'<p class="warn">Speicher nicht verfügbar: Änderungen gehen beim Neuladen verloren.</p>'}
     <div class="acts">${ex?'<button type="button" class="btn" id="s-ex">Beispielteile entfernen</button>':''}<button type="button" class="btn danger" id="s-wipe">Alles löschen</button></div></div>
-  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.1 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
+  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.3 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
     if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(e=>{$('#s-size',panel).textContent=`≈ ${(e.usage/1048576).toFixed(1).replace('.',',')} MB belegt`;}).catch(()=>{$('#s-size',panel).textContent='';});
     else $('#s-size',panel).textContent='';
+    $('#s-fav',panel).addEventListener('change',e=>{S.meta.favBoost=e.target.checked;put('meta',S.meta);S.outfit.results=null;toast(e.target.checked?'Favoriten werden bevorzugt':'Favoriten werden nicht bevorzugt');});
     $('#s-exp',panel).addEventListener('click',async()=>{const data={app:'kleiderschrank',version:1,exported:new Date().toISOString(),items:S.items,outfits:S.outfits,packs:S.packs};
       const name=`kleiderschrank-backup-${todayISO()}.json`,blob=new Blob([JSON.stringify(data)],{type:'application/json'});try{const file=new File([blob],name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Kleiderschrank-Backup'});toast('Backup geteilt');return;}}catch(err){if(err&&err.name==='AbortError')return;}const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
       document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Backup heruntergeladen');});
@@ -878,9 +903,10 @@ const ACT={
   'item':a=>openItem(a.dataset.id),
   'fstyle':a=>{S.filters.style=a.dataset.v;renderSchrank();},
   'ffav':()=>{S.filters.fav=!S.filters.fav;renderSchrank();},
+  'fbl':()=>{S.filters.bl=!S.filters.bl;renderSchrank();},
   'ostyle':a=>{S.outfit.style=a.dataset.v;runSuggest();},
   'suggest':()=>runSuggest(),
-  'pin-pick':()=>openPicker({title:'Teil festsetzen',filter:i=>i.cat!=='unter'&&!noOutfit(i),onDone:([id])=>{S.outfit.pin=id;runSuggest();}}),
+  'pin-pick':()=>openPicker({title:'Teil festsetzen',filter:i=>!NOSTYLE.includes(i.cat)&&!noOutfit(i)&&!i.blacklist,onDone:([id])=>{S.outfit.pin=id;runSuggest();}}),
   'pin-item':a=>{S.outfit.pin=a.dataset.id;runSuggest();scrollTo(0,0);},
   'unpin':()=>{S.outfit.pin=null;runSuggest();},
   'save-outfit':a=>{const r=S.outfit.results?.list?.[+a.dataset.i];if(!r||r.saved)return;const ids={};SLOTS.forEach(([k])=>{if(r.o[k])ids[k]=r.o[k].id;});
@@ -947,8 +973,8 @@ async function init(){
   const [items,outfits,packs,meta]=await Promise.all([dbAll('items'),dbAll('outfits'),dbAll('packs'),dbAll('meta')]);
   S.items=items.map(migrate);S.outfits=outfits;S.packs=packs;
   const m=meta.find(x=>x.id==='meta');if(m)S.meta={...S.meta,...m};
-  if(m&&(S.meta.schema||1)<3){S.items.forEach(it=>put('items',it));}
-  S.meta.schema=3;
+  if(m&&(S.meta.schema||1)<4){S.items.forEach(it=>put('items',it));}
+  S.meta.schema=4;
   if(!S.meta.seeded){
     exampleItems().forEach(it=>{S.items.push(it);put('items',it);});
     const p={id:'ex-pack',example:true,name:'Beispiel: Wochenende Berlin',start:addDays(7),end:addDays(9),wash:0,climate:'gemischt',sport:true,fancyDays:1,travelFit:true,entries:[],warn:[],created:Date.now()};
@@ -956,6 +982,7 @@ async function init(){
     S.meta.seeded=true;S.meta.exV2=true;put('meta',S.meta);
   }
   if(!S.meta.exV2){if(S.items.some(i=>i.example))exampleV2().forEach(it=>{S.items.push(it);put('items',it);});S.meta.exV2=true;put('meta',S.meta);}
+  if(!S.meta.exV3){S.items.filter(i=>i.example&&!i.set).forEach(i=>{const n=i.brand==='Adidas'&&/^Training/.test(i.name)?'Adidas-Anzug':/^Gemütlich/.test(i.name)?'Reise-Set':'';if(n){i.set=n;put('items',i);}});S.meta.exV3=true;put('meta',S.meta);}
   S.packs.forEach(p=>{if(p.fancyDays==null){p.fancyDays=p.fancy?1:0;delete p.fancy;p.travelFit=!!p.example;if(p.example)recalcPack(p);put('packs',p);}});
   if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
   renderAll();fetchWeather();
