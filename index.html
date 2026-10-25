@@ -287,7 +287,7 @@ const SOCK=['weiß','schwarz','egal','keine'];
 const WEATHER_J=['Winterjacke','Regenjacke'];
 const SLOTS=[['basis','Basis'],['layer','Schicht'],['jacket','Jacke'],['hose','Hose'],['shoes','Schuhe'],['kopf','Kopf']];
 
-const formal=i=>CATS[i.cat]?.types[i.type]?.[0]??2;
+const formal=i=>{const f=CATS[i.cat]?.types[i.type]?.[0]??2;return i.styles&&i.styles.includes('Schick')?Math.max(f,4):f;};
 const noOutfit=i=>!i.styles.some(s=>OUTFIT_STYLES.includes(s));
 const dname=i=>i.name||i.type;
 const sub=i=>[i.color,i.brand].filter(Boolean).join(' · ');
@@ -407,7 +407,7 @@ function accentOk(arr){const acc=[...new Set(arr.map(i=>i.color).filter(c=>COL[c
 function evalOutfit(o,{t,rain,R,pen}){
   if(o.layer&&o.basis.type!=='T-Shirt')return null;
   const vis=[o.basis,o.layer,o.jacket,o.hose,o.shoes].filter(Boolean);
-  const f=vis.filter(i=>!(i.cat==='jacke'&&WEATHER_J.includes(i.type))).map(formal);
+  const f=vis.filter(i=>!(i.cat==='jacke'&&WEATHER_J.includes(i.type))&&!(i===o.basis&&o.layer)).map(formal);
   const spread=Math.max(...f)-Math.min(...f);
   if(spread>2)return null;
   let sc=spread===0?3:spread===1?1:-2; const why=[];
@@ -459,7 +459,8 @@ function trim(lists,max){
 function suggest({style,t,rain,pin}){
   const R=weatherRules(t,rain),pinI=pin?S.items.find(i=>i.id===pin):null,has=i=>i.styles.includes(style),pen=new Map(),notes=[];
   const sea=seasonFor(t);const P=c=>S.items.filter(i=>i.cat===c&&has(i)&&!i.blacklist&&seasonOk(i,sea));
-  let basis=P('basis'),hose=P('hose').filter(i=>R.shorts||!/Shorts/.test(i.type)),shoes=P('schuhe').filter(i=>R.sandals||i.type!=='Sandalen/Slides');
+  const coverIds=new Set();
+  let basis=[...P('basis'),...S.items.filter(i=>i.cat==='basis'&&i.type==='T-Shirt'&&!has(i)&&!noOutfit(i)&&!i.blacklist&&seasonOk(i,sea)&&coverIds.add(i.id))],hose=P('hose').filter(i=>R.shorts||!/Shorts/.test(i.type)),shoes=P('schuhe').filter(i=>R.sandals||i.type!=='Sandalen/Slides');
   let layers=P('schicht');
   let jackets=P('jacke').filter(i=>R.jTypes.includes(i.type));
   const pinL=pinI&&pinI.cat==='schicht',pinJ=pinI&&pinI.cat==='jacke';
@@ -491,6 +492,7 @@ function suggest({style,t,rain,pin}){
   for(const b of basis)for(const l of lo)for(const j of jo){
     if(R.either&&!l&&!j&&canEither)continue;
     if(R.layer==='req'&&!l&&layers.length&&!NO_LAYER_OK.includes(b.type))continue;
+    if(!l&&coverIds.has(b.id))continue;
     for(const h of hose)for(const s of shoes){const r=evalOutfit({basis:b,layer:l,jacket:j,hose:h,shoes:s},{t,rain,R,pen});if(r)out.push(r);}
   }
   if(!out.length)return {error:'Keine stimmige Kombination gefunden. Meist liegen die Formalitäten zu weit auseinander (z. B. Hemd + Hoodie). Check die Stil-Tags.',notes};
@@ -516,9 +518,10 @@ function computeSuggest(){
 function runSuggest(){computeSuggest();renderOutfit();}
 
 /* ========== Packlisten-Logik ========== */
-function validTriple(b,h,s,st=OUTFIT_STYLES){
-  if(!st.some(x=>b.styles.includes(x)&&h.styles.includes(x)&&s.styles.includes(x)))return false;
-  const f=[formal(b),formal(h),formal(s)];if(Math.max(...f)-Math.min(...f)>2)return false;
+function validTriple(b,h,s,st=OUTFIT_STYLES,cover=false){
+  const cv=cover&&b.type==='T-Shirt'&&!noOutfit(b);
+  if(!st.some(x=>(cv||b.styles.includes(x))&&h.styles.includes(x)&&s.styles.includes(x)))return false;
+  const f=cv?[formal(h),formal(s)]:[formal(b),formal(h),formal(s)];if(Math.max(...f)-Math.min(...f)>2)return false;
   if(!accentOk([b,h,s]))return false;
   if([b,h,s].filter(i=>i.pattern==='gemustert').length>1)return false;
   if(s.color==='Braun'&&h.color==='Schwarz')return false;
@@ -551,18 +554,19 @@ function buildPack(p){
   }
   /* Tage aufteilen: F schick, E Casual/Streetwear */
   const TRI=['schuhe','hose','basis'];
-  const portion=(st,T)=>{
-    const pool=c=>ITEMS.filter(i=>i.cat===c&&climOk(i)&&!travel.has(i)&&i.styles.some(x=>st.includes(x)));
+  const portion=(st,T,cover=false)=>{
+    const pool=c=>ITEMS.filter(i=>i.cat===c&&climOk(i)&&!travel.has(i)&&(i.styles.some(x=>st.includes(x))||(cover&&c==='basis'&&i.type==='T-Shirt'&&!noOutfit(i))));
     const P={basis:pool('basis'),hose:pool('hose'),schuhe:pool('schuhe')},ch={basis:[],hose:[],schuhe:[]},got={basis:0,hose:0,schuhe:0};
     const gain=(sl,i)=>{const [x,y]=TRI.filter(z=>z!==sl);const A=ch[x].length?ch[x]:P[x],B=ch[y].length?ch[y]:P[y];let n=0;
-      for(const a of A)for(const b of B){const t={[sl]:i,[x]:a,[y]:b};if(validTriple(t.basis,t.hose,t.schuhe,st))n++;}return n;};
+      for(const a of A)for(const b of B){const t={[sl]:i,[x]:a,[y]:b};if(validTriple(t.basis,t.hose,t.schuhe,st,cover))n++;}return n;};
     const pick=sl=>{let best=null,bs=-Infinity;for(const i of P[sl]){if(qty(i)>=i.count)continue;let v=gain(sl,i);if(qty(i)>0)v-=1000;
       if(ch[sl].some(e=>e!==i&&e.type===i.type&&e.color===i.color))v*=.5;if(i.fav&&favOn())v=v*1.3+1;v+=Math.random()*.1;if(v>bs){bs=v;best=i;}}return best;};
     for(const sl of TRI){while(got[sl]<T[sl]){const i=pick(sl);if(!i)break;if(!ch[sl].includes(i))ch[sl].push(i);push(i);got[sl]++;}}
     return {ch,got};
   };
   const TS={basis:F,hose:Math.max(1,Math.ceil(F/3)),schuhe:1},TE={basis:E,hose:Math.max(1,Math.ceil(E/3)),schuhe:(F>0||D===1)?1:2};
-  const rs=F>0?portion(['Schick'],TS):null,re=E>0?portion(['Casual','Streetwear'],TE):null;
+  const coverSchick=cl!=='warm'&&ITEMS.some(i=>i.cat==='schicht'&&i.styles.includes('Schick')&&climOk(i));
+  const rs=F>0?portion(['Schick'],TS,coverSchick):null,re=E>0?portion(['Casual','Streetwear'],TE):null;
   const lab={basis:'Basis-Oberteile',hose:'Hosen',schuhe:'Paar Schuhe'};
   for(const sl of TRI){
     if(rs&&rs.got[sl]<TS[sl])warn.push(`Nur ${rs.got[sl]} schicke ${lab[sl]} verfügbar (geplant: ${TS[sl]}).`);
@@ -573,9 +577,14 @@ function buildPack(p){
   /* Zweite Schicht */
   const Tl=cl==='warm'?1:cl==='gemischt'?Math.min(2,D):Math.min(3,D);
   const fitsL=l=>{let n=0;for(const b of Bs.filter(x=>x.type==='T-Shirt'))for(const h of Hs){const f=[formal(l),formal(b),formal(h)];if(Math.max(...f)-Math.min(...f)<=2&&accentOk([l,b,h]))n++;}return n;};
-  let nl=0;ITEMS.filter(i=>i.cat==='schicht'&&climOk(i)&&!travel.has(i)&&!noOutfit(i))
+  let nl=0;
+  if(rs&&rs.ch.basis.some(b=>!b.styles.includes('Schick'))){
+    const sl=ITEMS.filter(i=>i.cat==='schicht'&&i.styles.includes('Schick')&&climOk(i)&&!travel.has(i)).sort((a,b)=>(b.fav&&favOn()?1:0)-(a.fav&&favOn()?1:0))[0];
+    if(sl){push(sl);nl++;}else warn.push('Für die schicken Tage ist ein T-Shirt eingeplant, aber kein schicker Pullover vorhanden.');
+  }
+  ITEMS.filter(i=>i.cat==='schicht'&&climOk(i)&&!travel.has(i)&&!noOutfit(i))
     .map(l=>({l,s:fitsL(l)+(cl==='kalt'&&l.seasons.includes('Winter')?2:0)+(cl==='warm'&&l.seasons.includes('Sommer')?2:0)+(l.fav&&favOn()?2:0)})).sort((a,b)=>b.s-a.s)
-    .forEach(({l})=>{if(nl<Tl){push(l);nl++;}});
+    .forEach(({l})=>{if(nl<Tl&&qty(l)<l.count){push(l);nl++;}});
   if(nl&&!Bs.some(b=>b.type==='T-Shirt'))warn.push('Unter Pullover/Hoodies gehören T-Shirts, es ist aber keins eingeplant.');
   /* Jacke */
   if(cl!=='warm'){
@@ -604,10 +613,11 @@ function recalcPack(p){
   const auto=r.entries.filter(e=>!manual.some(m=>m.itemId===e.itemId)).map(e=>{const o=old.get(e.itemId);return o?{...e,packed:o.packed,wear:e.wear||o.wear}:e;});
   p.entries=[...auto,...manual];p.warn=r.warn;
 }
-function countOutfits(entries){
+function countOutfits(entries,cl){
   const its=entries.map(e=>S.items.find(i=>i.id===e.itemId)).filter(Boolean);
   const B=its.filter(i=>i.cat==='basis'),H=its.filter(i=>i.cat==='hose'),Sh=its.filter(i=>i.cat==='schuhe');
-  let n=0;for(const b of B)for(const h of H)for(const s of Sh)if(validTriple(b,h,s))n++;return n;
+  const cover=cl!=='warm'&&its.some(i=>i.cat==='schicht');
+  let n=0;for(const b of B)for(const h of H)for(const s of Sh)if(validTriple(b,h,s,OUTFIT_STYLES,cover))n++;return n;
 }
 
 /* ========== UI-Helfer ========== */
@@ -718,7 +728,7 @@ function renderPack(){
     <div style="display:grid;gap:4px"><h2 style="font-size:24px;font-weight:780">${esc(p.name)}</h2>
     <span class="pl-m mono">${fmtDate(p.start)} – ${fmtDate(p.end)} · ${days} Tage</span>
     <span class="pl-m">${p.wash>0?`Wäsche alle ${p.wash} Tage → gerechnet mit ${D} Tagen`:'Keine Wäsche'} · Klima ${climate}${p.sport?' · Sport dabei':''}${p.fancyDays?` · ${p.fancyDays} ${p.fancyDays===1?'Tag':'Tage'} schick`:''}${p.travelFit?' · Reise-Fit':''}</span></div>
-    <div class="card stats"><div class="stats-row"><span><b class="mono">${done}/${packRows.length}</b> gepackt</span><span>ergibt <b class="mono">${countOutfits(p.entries)}</b> Outfits</span></div><div class="bar"><span style="width:${packRows.length?Math.round(done/packRows.length*100):0}%"></span></div></div>
+    <div class="card stats"><div class="stats-row"><span><b class="mono">${done}/${packRows.length}</b> gepackt</span><span>ergibt <b class="mono">${countOutfits(p.entries,p.climate)}</b> Outfits</span></div><div class="bar"><span style="width:${packRows.length?Math.round(done/packRows.length*100):0}%"></span></div></div>
     ${(p.warn||[]).map(w=>`<p class="warn">${esc(w)}</p>`).join('')}
     ${p.sport?`<div class="card"><p style="margin:0">Sport dabei: Sportsachen packst du selbst zusammen.</p><button type="button" class="btn" data-a="pack-add" data-sport="1">Sportteile hinzufügen</button></div>`:''}
     ${groups.map(([c,a])=>`<div class="pg"><h3>${CATS[c].label}</h3>${a.map(({e,ix,i})=>`<div class="pr${e.packed?' done':''}${e.wear?' wear':''}">
@@ -876,7 +886,7 @@ function openSettings(){
   <div class="set"><h3>Daten</h3><p><span class="mono">${S.items.length}</span> Teile, davon <span class="mono">${ex}</span> Beispiele · <span id="s-size" class="mono">…</span></p>
     ${S.dbOk?'':'<p class="warn">Speicher nicht verfügbar: Änderungen gehen beim Neuladen verloren.</p>'}
     <div class="acts">${ex?'<button type="button" class="btn" id="s-ex">Beispielteile entfernen</button>':''}<button type="button" class="btn danger" id="s-wipe">Alles löschen</button></div></div>
-  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.4 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
+  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.5 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
     if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(e=>{$('#s-size',panel).textContent=`≈ ${(e.usage/1048576).toFixed(1).replace('.',',')} MB belegt`;}).catch(()=>{$('#s-size',panel).textContent='';});
     else $('#s-size',panel).textContent='';
     $('#s-fav',panel).addEventListener('change',e=>{S.meta.favBoost=e.target.checked;put('meta',S.meta);S.outfit.results=null;toast(e.target.checked?'Favoriten werden bevorzugt':'Favoriten werden nicht bevorzugt');});
