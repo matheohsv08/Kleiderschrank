@@ -874,32 +874,74 @@ function openPackForm(p){
   });
 }
 
+function doImport(data,replace){
+  const items=data.items.filter(x=>x&&x.id&&CATS[x.cat]).map(migrate);
+  const outfits=(data.outfits||[]).filter(x=>x&&x.id&&x.ids),packs=(data.packs||[]).filter(x=>x&&x.id&&Array.isArray(x.entries));
+  const merge=(cur,add)=>{const m=new Map(cur.map(x=>[x.id,x]));add.forEach(x=>m.set(x.id,x));return [...m.values()];};
+  const nI=replace?items:merge(S.items,items),nO=replace?outfits:merge(S.outfits,outfits),nP=replace?packs:merge(S.packs,packs);
+  const st=data.settings||{},meta={...S.meta,id:'meta',unlocked:true,seeded:true,exV2:true,exV3:true};
+  if(replace){if(typeof st.favBoost==='boolean')meta.favBoost=st.favBoost;meta.recent=Array.isArray(st.recent)?st.recent:[];}
+  return new Promise((res,rej)=>{
+    const apply=()=>{S.items=nI;S.outfits=nO;S.packs=nP;S.meta=meta;try{localStorage.setItem('ks-unlocked','1');}catch(e){}res();};
+    if(!DB.db){apply();return;}
+    try{const tx=DB.db.transaction(['items','outfits','packs','meta'],'readwrite'),os=n=>tx.objectStore(n);
+      if(replace)['items','outfits','packs'].forEach(n=>os(n).clear());
+      items.forEach(x=>os('items').put(x));outfits.forEach(x=>os('outfits').put(x));packs.forEach(x=>os('packs').put(x));os('meta').put(meta);
+      tx.oncomplete=apply;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error);
+    }catch(e){rej(e);}
+  });
+}
+function openImportConfirm(data){
+  const n=a=>Array.isArray(a)?a.length:0,photos=data.items.filter(i=>i&&i.photo).length,when=data.exported?fmtTs(Date.parse(data.exported)):'unbekannt';
+  const exN=S.items.filter(i=>i.example).length;
+  openSheet(`<div class="sh-head"><button type="button" class="link" data-a="close-sheet">Abbrechen</button><h2>Import</h2><span style="width:60px"></span></div>
+  <div class="form">
+    <div class="card"><span class="lab">In der Datei</span><p style="margin:0"><b class="mono">${n(data.items)}</b> Teile, davon <span class="mono">${photos}</span> mit Foto · <b class="mono">${n(data.outfits)}</b> Outfits · <b class="mono">${n(data.packs)}</b> Packlisten</p><p class="hint">Exportiert am ${when}</p></div>
+    <div class="card"><span class="lab">Auf diesem Gerät</span><p style="margin:0"><b class="mono">${S.items.length}</b> Teile${exN?`, davon <span class="mono">${exN}</span> Beispiele`:''} · <b class="mono">${S.outfits.length}</b> Outfits · <b class="mono">${S.packs.length}</b> Packlisten</p></div>
+    <p class="note">Sollen die bestehenden Daten auf diesem Gerät ersetzt werden?</p>
+    <button type="button" class="btn danger" id="im-rep">Ja, alles ersetzen</button>
+    <p class="hint">Löscht alles auf diesem Gerät und übernimmt die Datei 1:1, inklusive Einstellungen.</p>
+    <button type="button" class="btn" id="im-mrg">Nein, zusammenführen</button>
+    <p class="hint">Behält alles hier und fügt die Datei hinzu. Teile, die es schon gibt, bekommen den Stand aus der Datei.</p>
+    <p class="note" id="im-st" hidden></p>
+  </div>`,panel=>{
+    const btns=()=>panel.querySelectorAll('button');
+    const run=async replace=>{btns().forEach(b=>b.disabled=true);const st=$('#im-st',panel);st.hidden=false;st.textContent='Importiere … App bitte offen lassen.';
+      try{await doImport(data,replace);const saved=S.dbOk?(await dbAll('items')).length:S.items.length;
+        S.outfit.results=null;S.outfit.pin=null;S.packOpen=null;closeSheet();renderAll();
+        toast(saved===S.items.length?`Import fertig: ${S.items.length} Teile`:`Achtung: nur ${saved} von ${S.items.length} Teilen gespeichert`);}
+      catch(err){st.textContent='Import fehlgeschlagen. Auf diesem Gerät wurde nichts geändert.';btns().forEach(b=>b.disabled=false);}};
+    $('#im-rep',panel).addEventListener('click',e=>{const b=e.currentTarget;if(!b.dataset.armed){b.dataset.armed='1';b.textContent='Sicher? Nochmal tippen zum Ersetzen';return;}run(true);});
+    $('#im-mrg',panel).addEventListener('click',()=>run(false));
+  });
+}
 function openSettings(){
   const ex=S.items.filter(i=>i.example).length;
   openSheet(`<div class="sh-head"><span style="width:60px"></span><h2>Einstellungen</h2><button type="button" class="link strong" data-a="close-sheet">Fertig</button></div>
   <div class="set"><h3>Einladungscode</h3><p>Zum Weitergeben an Freunde: <b class="mono">${INVITE}</b>. Der Code hält zufällige Besucher ab, ist aber kein echter Schutz.</p></div>
   <div class="set"><h3>Wetter</h3><p>Standort Hamburg. Das Live-Wetter kommt von Open-Meteo. Es wird beim Öffnen der App geladen. Mit dem Regler kannst du es jederzeit überschreiben.</p></div>
   <div class="set"><h3>Favoriten</h3><label class="tgl"><input type="checkbox" id="s-fav"${favOn()?' checked':''}>In Outfits und Packlisten bevorzugen</label><p class="hint">Aus: Favoriten bleiben markiert und filterbar, beeinflussen aber keine Vorschläge. Bestehende Packlisten ändern sich erst mit „Neu vorschlagen“.</p></div>
-  <div class="set"><h3>Backup</h3><p>Sichert alle Teile inklusive Fotos, Outfits und Packlisten als JSON-Datei.</p>
-    <div class="acts"><button type="button" class="btn" id="s-exp">Backup exportieren</button><label class="btn" for="s-imp">Backup importieren</label><input class="vh" type="file" id="s-imp" accept="application/json,.json"></div>
-    <p class="hint">Sicher das Backup über „Teilen → In Dateien sichern“ in iCloud Drive, am besten regelmäßig. Wenn du die App vom Home-Bildschirm löschst, sind die Daten weg.</p></div>
+  <div class="set"><h3>Umzug &amp; Backup</h3><p>Exportiert alles in eine Datei: Teile mit Fotos, Sets, Blacklist, Favoriten, Outfits, Packlisten und Einstellungen. Die Datei kannst du per AirDrop aufs andere iPhone schicken oder in iCloud Drive sichern.</p>
+    <div class="acts"><button type="button" class="btn primary" id="s-exp">Alles exportieren</button><label class="btn" for="s-imp">Datei importieren</label><input class="vh" type="file" id="s-imp"></div>
+    <p class="hint">Beim Import fragt die App, ob die Daten hier ersetzt werden sollen. Tipp: regelmäßig exportieren und in iCloud Drive sichern. Wenn du die App vom Home-Bildschirm löschst, sind die Daten weg.</p></div>
   <div class="set"><h3>Daten</h3><p><span class="mono">${S.items.length}</span> Teile, davon <span class="mono">${ex}</span> Beispiele · <span id="s-size" class="mono">…</span></p>
     ${S.dbOk?'':'<p class="warn">Speicher nicht verfügbar: Änderungen gehen beim Neuladen verloren.</p>'}
     <div class="acts">${ex?'<button type="button" class="btn" id="s-ex">Beispielteile entfernen</button>':''}<button type="button" class="btn danger" id="s-wipe">Alles löschen</button></div></div>
-  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.5 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
+  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.6 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
     if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(e=>{$('#s-size',panel).textContent=`≈ ${(e.usage/1048576).toFixed(1).replace('.',',')} MB belegt`;}).catch(()=>{$('#s-size',panel).textContent='';});
     else $('#s-size',panel).textContent='';
     $('#s-fav',panel).addEventListener('change',e=>{S.meta.favBoost=e.target.checked;put('meta',S.meta);S.outfit.results=null;toast(e.target.checked?'Favoriten werden bevorzugt':'Favoriten werden nicht bevorzugt');});
-    $('#s-exp',panel).addEventListener('click',async()=>{const data={app:'kleiderschrank',version:1,exported:new Date().toISOString(),items:S.items,outfits:S.outfits,packs:S.packs};
-      const name=`kleiderschrank-backup-${todayISO()}.json`,blob=new Blob([JSON.stringify(data)],{type:'application/json'});try{const file=new File([blob],name,{type:'application/json'});if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Kleiderschrank-Backup'});toast('Backup geteilt');return;}}catch(err){if(err&&err.name==='AbortError')return;}const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
-      document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Backup heruntergeladen');});
-    $('#s-imp',panel).addEventListener('change',async e=>{const f=e.target.files&&e.target.files[0];if(!f)return;
-      try{const data=JSON.parse(await f.text());if(!Array.isArray(data.items))throw 0;
-        data.items.forEach(raw=>{const it=migrate(raw);const ix=S.items.findIndex(i=>i.id===it.id);if(ix>=0)S.items[ix]=it;else S.items.push(it);put('items',it);});
-        (data.outfits||[]).forEach(o=>{if(!S.outfits.some(x=>x.id===o.id)){S.outfits.push(o);put('outfits',o);}});
-        (data.packs||[]).forEach(p=>{const ix=S.packs.findIndex(x=>x.id===p.id);if(ix>=0)S.packs[ix]=p;else S.packs.push(p);put('packs',p);});
-        closeSheet();S.outfit.results=null;renderAll();toast(`Import: ${data.items.length} Teile`);
-      }catch(err){toast('Datei ist kein gültiges Backup');}});
+    $('#s-exp',panel).addEventListener('click',async()=>{
+      const data={app:'kleiderschrank',version:2,exported:new Date().toISOString(),items:S.items,outfits:S.outfits,packs:S.packs,settings:{favBoost:favOn(),recent:S.meta.recent||[]}};
+      const name=`kleiderschrank-${todayISO()}.json`,blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+      try{const file=new File([blob],name,{type:'application/json'});
+        if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file]});toast('Export geteilt');return;}}
+      catch(err){if(err&&err.name==='AbortError')return;}
+      try{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Export heruntergeladen');}
+      catch(err){toast('Export nicht möglich');}});
+    $('#s-imp',panel).addEventListener('change',async e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;
+      let data;try{data=JSON.parse(await f.text());if(!data||!Array.isArray(data.items))throw 0;}catch(err){toast('Datei ist kein gültiges Kleiderschrank-Backup');return;}
+      openImportConfirm(data);});
     const exb=$('#s-ex',panel);if(exb)exb.addEventListener('click',()=>{
       const ids=new Set(S.items.filter(i=>i.example).map(i=>i.id));
       ids.forEach(id=>del('items',id));S.items=S.items.filter(i=>!ids.has(i.id));
