@@ -430,7 +430,6 @@ function evalOutfit(o,{t,rain,R,pen}){
   if(d>=.35){sc+=5;why.push([3,'Starker Hell-Dunkel-Kontrast oben/unten']);}
   else if(d>=.2){sc+=2;why.push([1,'Guter Kontrast oben/unten']);}
   else if(d<.1&&!allBlack&&!setTH)sc-=3;
-  if(o.layer&&isBasic(o.basis))sc+=3;
   const favs=vis.filter(i=>i.fav);
   if(favs.length&&favOn()){sc+=1.5*Math.min(3,favs.length);why.push([1,favs.length===1?`Favorit: ${dname(favs[0])}`:`${favs.length} Favoriten dabei`]);}
   const cols=[...new Set(vis.map(i=>i.color))];let pc=0;
@@ -934,7 +933,7 @@ function openSettings(){
   <div class="set"><h3>Daten</h3><p><span class="mono">${S.items.length}</span> Teile, davon <span class="mono">${ex}</span> Beispiele · <span id="s-size" class="mono">…</span></p>
     ${S.dbOk?'':'<p class="warn">Speicher nicht verfügbar: Änderungen gehen beim Neuladen verloren.</p>'}
     <div class="acts">${ex?'<button type="button" class="btn" id="s-ex">Beispielteile entfernen</button>':''}<button type="button" class="btn danger" id="s-wipe">Alles löschen</button></div></div>
-  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.7 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
+  ${(navigator.standalone||matchMedia('(display-mode: standalone)').matches)?'':'<p class="warn">Du nutzt die App gerade im Browser. Diese Daten sind getrennt von der App auf dem Home-Bildschirm. Erfass deine Teile nur in der Home-Bildschirm-App.</p>'}<p class="hint">Version 2.8 · Daten liegen nur lokal auf diesem Gerät.</p>`,panel=>{
     if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(e=>{$('#s-size',panel).textContent=`≈ ${(e.usage/1048576).toFixed(1).replace('.',',')} MB belegt`;}).catch(()=>{$('#s-size',panel).textContent='';});
     else $('#s-size',panel).textContent='';
     $('#s-fav',panel).addEventListener('change',e=>{S.meta.favBoost=e.target.checked;put('meta',S.meta);S.outfit.results=null;toast(e.target.checked?'Favoriten werden bevorzugt':'Favoriten werden nicht bevorzugt');});
